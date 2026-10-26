@@ -4,10 +4,11 @@ import type { NextRequest } from 'next/server';
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow public access to assets, auth API, login, manifest, and icons
+  // Allow public access to assets, auth API, streaming proxy, login, manifest, and icons
   const isPublicRoute =
     pathname === '/login' ||
     pathname.startsWith('/api/auth') ||
+    pathname.startsWith('/api/proxy') ||
     pathname.startsWith('/icons/') ||
     pathname === '/manifest.json' ||
     pathname === '/manifest.webmanifest' ||

@@ -17,8 +17,8 @@ export async function OPTIONS() {
 
 /**
  * Rewrites URLs inside an M3U8 playlist:
- * - Child playlists (.m3u8) are routed through /api/proxy
- * - Media segments (.ts, .m4s) resolve to direct absolute CDN URLs (zero Vercel bandwidth with no-referrer)
+ * - Child playlists (.m3u8) and media segments (.ts, .m4s) route back through /api/proxy
+ *   to guarantee 100% CORS compliance with Access-Control-Allow-Origin: *
  */
 function rewriteM3u8Playlist(
   content: string,
@@ -45,7 +45,8 @@ function rewriteM3u8Playlist(
       if (uriMatch && uriMatch[1]) {
         try {
           const resolvedUri = new URL(uriMatch[1], baseUrl).toString();
-          line = line.replace(uriMatch[0], `URI="${resolvedUri}"`);
+          const proxiedUri = `${proxyOrigin}/api/proxy?url=${encodeURIComponent(resolvedUri)}${refererParam}`;
+          line = line.replace(uriMatch[0], `URI="${proxiedUri}"`);
         } catch {
           // If URL parsing fails, retain original
         }
@@ -60,18 +61,11 @@ function rewriteM3u8Playlist(
       continue;
     }
 
-    // Media segment URL or child playlist URL
+    // Media segment URL or child playlist URL -> route through proxy for CORS headers
     try {
       const resolvedUrl = new URL(trimmed, baseUrl).toString();
-      const isSubManifest = resolvedUrl.toLowerCase().includes('.m3u8');
-      if (isSubManifest) {
-        // Sub-playlists must route through proxy so they are also parsed
-        const proxiedUrl = `${proxyOrigin}/api/proxy?url=${encodeURIComponent(resolvedUrl)}${refererParam}`;
-        rewrittenLines.push(proxiedUrl);
-      } else {
-        // Direct absolute CDN URL for video chunks (zero Vercel bandwidth)
-        rewrittenLines.push(resolvedUrl);
-      }
+      const proxiedUrl = `${proxyOrigin}/api/proxy?url=${encodeURIComponent(resolvedUrl)}${refererParam}`;
+      rewrittenLines.push(proxiedUrl);
     } catch {
       rewrittenLines.push(line);
     }

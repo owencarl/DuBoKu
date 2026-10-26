@@ -120,6 +120,9 @@ export default function Player({
           enableWorker: true,
           lowLatencyMode: true,
           backBufferLength: 90,
+          xhrSetup: (xhr) => {
+            xhr.withCredentials = true;
+          },
         });
 
         // Function to switch to fallback proxy URL seamlessly without user intervention
