@@ -391,6 +391,59 @@ export default function Player({
     }
   };
 
+  // Listen to fullscreenchange to keep state synced & unlock orientation when leaving
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isNowFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement
+      );
+      setIsFullscreen(isNowFs);
+      if (!isNowFs) {
+        try {
+          if (screen.orientation && 'unlock' in screen.orientation) {
+            (screen.orientation as any).unlock();
+          }
+        } catch {
+          // Ignore orientation unlock error
+        }
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      try {
+        if (screen.orientation && 'unlock' in screen.orientation) {
+          (screen.orientation as any).unlock();
+        }
+      } catch {}
+    };
+  }, []);
+
+  // Safe close handler that restores orientation & exits fullscreen
+  const handleClose = async () => {
+    if (document.fullscreenElement || (document as any).webkitFullscreenElement) {
+      try {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        }
+      } catch {}
+    }
+    try {
+      if (screen.orientation && 'unlock' in screen.orientation) {
+        (screen.orientation as any).unlock();
+      }
+    } catch {}
+    onClose();
+  };
+
   // Picture in Picture
   const togglePiP = async () => {
     const video = videoRef.current;
@@ -407,16 +460,45 @@ export default function Player({
     }
   };
 
-  // Fullscreen
+  // Fullscreen with automatic mobile landscape lock
   const toggleFullscreen = async () => {
-    if (!containerRef.current) return;
+    const container = containerRef.current;
+    const video = videoRef.current;
+    if (!container) return;
 
-    if (!document.fullscreenElement) {
-      await containerRef.current.requestFullscreen?.();
-      setIsFullscreen(true);
-    } else {
-      await document.exitFullscreen?.();
-      setIsFullscreen(false);
+    try {
+      const isCurrentlyFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement
+      );
+
+      if (!isCurrentlyFs) {
+        if (container.requestFullscreen) {
+          await container.requestFullscreen();
+        } else if ((container as any).webkitRequestFullscreen) {
+          await (container as any).webkitRequestFullscreen();
+        } else if (video && (video as any).webkitEnterFullscreen) {
+          (video as any).webkitEnterFullscreen();
+        }
+        setIsFullscreen(true);
+
+        // Lock to landscape for mobile devices
+        if (screen.orientation && 'lock' in screen.orientation) {
+          await (screen.orientation as any).lock('landscape').catch(() => {});
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        }
+        setIsFullscreen(false);
+        if (screen.orientation && 'unlock' in screen.orientation) {
+          (screen.orientation as any).unlock();
+        }
+      }
+    } catch (err) {
+      console.warn('[Player] Fullscreen/orientation toggle failed:', err);
     }
   };
 
@@ -517,7 +599,7 @@ export default function Player({
               Retry Stream
             </button>
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="px-5 py-2.5 rounded-full bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-neutral-200 text-xs font-semibold transition"
             >
               Back to Catalog
@@ -531,12 +613,17 @@ export default function Player({
         className={`absolute top-0 inset-x-0 bg-gradient-to-b from-black/80 via-black/40 to-transparent p-4 flex items-center justify-between transition-opacity duration-300 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
+        style={{
+          paddingLeft: 'max(1rem, env(safe-area-inset-left))',
+          paddingRight: 'max(1rem, env(safe-area-inset-right))',
+          paddingTop: 'max(1rem, env(safe-area-inset-top))',
+        }}
       >
         <div className="flex items-center space-x-3 max-w-[70%]">
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onClose();
+              handleClose();
             }}
             className="p-2 -ml-2 rounded-full hover:bg-white/20 active:scale-95 transition"
             aria-label="Back"
@@ -657,6 +744,11 @@ export default function Player({
         className={`absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pb-6 pt-8 transition-opacity duration-300 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
+        style={{
+          paddingLeft: 'max(1rem, env(safe-area-inset-left))',
+          paddingRight: 'max(1rem, env(safe-area-inset-right))',
+          paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))',
+        }}
       >
         {/* Scrubber Progress Bar */}
         <div className="flex items-center space-x-3 mb-2">
@@ -769,7 +861,12 @@ export default function Player({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-neutral-900 border-t border-neutral-800 rounded-t-2xl p-5 max-h-[60vh] flex flex-col animate-in slide-in-from-bottom duration-200"
+            className="bg-neutral-900 border-t border-neutral-800 rounded-t-2xl p-5 max-h-[60vh] sm:max-h-[75vh] flex flex-col animate-in slide-in-from-bottom duration-200"
+            style={{
+              paddingLeft: 'max(1.25rem, env(safe-area-inset-left))',
+              paddingRight: 'max(1.25rem, env(safe-area-inset-right))',
+              paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))',
+            }}
           >
             <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
               <h3 className="text-base font-bold text-white">Episodes ({media.episodes.length})</h3>
