@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  streampulse-pwa:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: streampulse-pwa
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
