@@ -372,10 +372,13 @@ export class DbkuProvider implements BaseMediaProvider {
     console.log(`[DbkuProvider] Resolved raw stream URL for ${playPath}:`, rawStreamUrl);
 
     const isMp4 = rawStreamUrl.toLowerCase().includes('.mp4');
-    const proxiedUrl = `/api/proxy?url=${encodeURIComponent(rawStreamUrl)}&referer=${encodeURIComponent(BASE_URL + '/')}`;
+    const externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+    const proxiedUrl = externalProxy
+      ? `${externalProxy.replace(/\/$/, '')}${externalProxy.includes('?') ? '&' : '/?'}url=${encodeURIComponent(rawStreamUrl)}&referer=${encodeURIComponent(BASE_URL + '/')}`
+      : `/api/proxy?url=${encodeURIComponent(rawStreamUrl)}&referer=${encodeURIComponent(BASE_URL + '/')}`;
 
     return {
-      streamUrl: proxiedUrl,
+      streamUrl: rawStreamUrl,
       fallbackProxyUrl: proxiedUrl,
       headers: {
         Referer: `${BASE_URL}/`,

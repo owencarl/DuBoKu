@@ -18,6 +18,7 @@ export async function OPTIONS() {
 /**
  * Rewrites URLs inside an M3U8 playlist:
  * - Child playlists (.m3u8) and media segments (.ts, .m4s) route back through /api/proxy
+ *   (or an external high-bandwidth streaming proxy like a Cloudflare Worker if configured)
  *   to guarantee 100% CORS compliance with Access-Control-Allow-Origin: *
  */
 function rewriteM3u8Playlist(
@@ -29,6 +30,12 @@ function rewriteM3u8Playlist(
   const lines = content.split(/\r?\n/);
   const rewrittenLines: string[] = [];
   const refererParam = customReferer ? `&referer=${encodeURIComponent(customReferer)}` : '';
+
+  // Use external proxy (e.g. Cloudflare Worker) if configured to offload 100% video bandwidth from Vercel
+  const externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+  const proxyBaseUrl = externalProxy
+    ? `${externalProxy.replace(/\/$/, '')}${externalProxy.includes('?') ? '&' : '/?'}`
+    : `${proxyOrigin}/api/proxy?`;
 
   for (let line of lines) {
     const trimmed = line.trim();
@@ -45,7 +52,7 @@ function rewriteM3u8Playlist(
       if (uriMatch && uriMatch[1]) {
         try {
           const resolvedUri = new URL(uriMatch[1], baseUrl).toString();
-          const proxiedUri = `${proxyOrigin}/api/proxy?url=${encodeURIComponent(resolvedUri)}${refererParam}`;
+          const proxiedUri = `${proxyBaseUrl}url=${encodeURIComponent(resolvedUri)}${refererParam}`;
           line = line.replace(uriMatch[0], `URI="${proxiedUri}"`);
         } catch {
           // If URL parsing fails, retain original
@@ -61,10 +68,10 @@ function rewriteM3u8Playlist(
       continue;
     }
 
-    // Media segment URL or child playlist URL -> route through proxy for CORS headers
+    // Media segment URL or child playlist URL
     try {
       const resolvedUrl = new URL(trimmed, baseUrl).toString();
-      const proxiedUrl = `${proxyOrigin}/api/proxy?url=${encodeURIComponent(resolvedUrl)}${refererParam}`;
+      const proxiedUrl = `${proxyBaseUrl}url=${encodeURIComponent(resolvedUrl)}${refererParam}`;
       rewrittenLines.push(proxiedUrl);
     } catch {
       rewrittenLines.push(line);
@@ -109,6 +116,20 @@ export async function GET(request: NextRequest) {
       upstreamHeaders['Referer'] = customReferer;
     } else {
       upstreamHeaders['Referer'] = `${parsedTarget.protocol}//${parsedTarget.host}/`;
+    }
+
+    // If an external high-bandwidth proxy (e.g. Cloudflare Worker) is configured,
+    // redirect heavy binary media chunks directly to it to avoid consuming Vercel bandwidth!
+    const externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+    const isChunkUrl = /\.(ts|m4s|mp4)($|\?)/i.test(targetUrl);
+    if (externalProxy && isChunkUrl) {
+      const redirectUrl = `${externalProxy.replace(/\/$/, '')}${externalProxy.includes('?') ? '&' : '/?'}url=${encodeURIComponent(targetUrl)}${customReferer ? `&referer=${encodeURIComponent(customReferer)}` : ''}`;
+      return NextResponse.redirect(redirectUrl, {
+        status: 307,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
     }
 
     // Range header support for video chunk seeking
