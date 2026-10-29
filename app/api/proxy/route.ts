@@ -32,7 +32,15 @@ function rewriteM3u8Playlist(
   const refererParam = customReferer ? `&referer=${encodeURIComponent(customReferer)}` : '';
 
   // Use external proxy (e.g. Cloudflare Worker) if configured to offload 100% video bandwidth from Vercel
-  const externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+  let externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+  if (
+    externalProxy &&
+    (externalProxy.includes('yourname') ||
+      externalProxy.includes('example') ||
+      !externalProxy.startsWith('http'))
+  ) {
+    externalProxy = undefined;
+  }
   const proxyBaseUrl = externalProxy
     ? `${externalProxy.replace(/\/$/, '')}${externalProxy.includes('?') ? '&' : '/?'}`
     : `${proxyOrigin}/api/proxy?`;
@@ -120,7 +128,15 @@ export async function GET(request: NextRequest) {
 
     // If an external high-bandwidth proxy (e.g. Cloudflare Worker) is configured,
     // redirect heavy binary media chunks directly to it to avoid consuming Vercel bandwidth!
-    const externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+    let externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+    if (
+      externalProxy &&
+      (externalProxy.includes('yourname') ||
+        externalProxy.includes('example') ||
+        !externalProxy.startsWith('http'))
+    ) {
+      externalProxy = undefined;
+    }
     const isChunkUrl = /\.(ts|m4s|mp4)($|\?)/i.test(targetUrl);
     if (externalProxy && isChunkUrl) {
       const redirectUrl = `${externalProxy.replace(/\/$/, '')}${externalProxy.includes('?') ? '&' : '/?'}url=${encodeURIComponent(targetUrl)}${customReferer ? `&referer=${encodeURIComponent(customReferer)}` : ''}`;

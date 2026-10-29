@@ -372,14 +372,27 @@ export class DbkuProvider implements BaseMediaProvider {
     console.log(`[DbkuProvider] Resolved raw stream URL for ${playPath}:`, rawStreamUrl);
 
     const isMp4 = rawStreamUrl.toLowerCase().includes('.mp4');
-    const externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
-    const proxiedUrl = externalProxy
+    let externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+
+    // Ignore placeholder / dummy URLs like 'yourname' or 'example'
+    if (
+      externalProxy &&
+      (externalProxy.includes('yourname') ||
+        externalProxy.includes('example') ||
+        !externalProxy.startsWith('http'))
+    ) {
+      console.warn('[DbkuProvider] Ignoring placeholder/invalid STREAM_PROXY_URL:', externalProxy);
+      externalProxy = undefined;
+    }
+
+    const localProxyUrl = `/api/proxy?url=${encodeURIComponent(rawStreamUrl)}&referer=${encodeURIComponent(BASE_URL + '/')}`;
+    const effectiveProxyUrl = externalProxy
       ? `${externalProxy.replace(/\/$/, '')}${externalProxy.includes('?') ? '&' : '/?'}url=${encodeURIComponent(rawStreamUrl)}&referer=${encodeURIComponent(BASE_URL + '/')}`
-      : `/api/proxy?url=${encodeURIComponent(rawStreamUrl)}&referer=${encodeURIComponent(BASE_URL + '/')}`;
+      : localProxyUrl;
 
     return {
-      streamUrl: rawStreamUrl,
-      fallbackProxyUrl: proxiedUrl,
+      streamUrl: effectiveProxyUrl,
+      fallbackProxyUrl: localProxyUrl,
       headers: {
         Referer: `${BASE_URL}/`,
       },

@@ -113,7 +113,7 @@ export default function Player({
       if (destroyed || !streamData || !videoRef.current) return;
 
       const targetVideo = videoRef.current;
-      let usingFallback = false;
+      let fallbackStep = 0;
 
       // Clean up existing HLS instance
       if (hlsRef.current) {
@@ -122,6 +122,25 @@ export default function Player({
       }
 
       const resumeTime = getResumeTime(media.id, currentEpisode.id);
+
+      // Clean stream URLs if placeholder/dummy domain is present
+      const sanitizeUrl = (url: string | undefined | null) => {
+        if (!url || url.includes('yourname') || url.includes('example')) {
+          return null;
+        }
+        return url;
+      };
+
+      const rawUrl = streamData.streamUrl.includes('url=')
+        ? decodeURIComponent(streamData.streamUrl.split('url=')[1].split('&')[0])
+        : streamData.streamUrl;
+
+      const guaranteedLocalProxy = `/api/proxy?url=${encodeURIComponent(rawUrl)}&referer=https%3A%2F%2Fwww.dbku.tv%2F`;
+
+      const primaryUrl =
+        sanitizeUrl(streamData.streamUrl) ||
+        sanitizeUrl(streamData.fallbackProxyUrl) ||
+        guaranteedLocalProxy;
 
       if (Hls.isSupported()) {
         const hls = new Hls({
@@ -133,20 +152,28 @@ export default function Player({
           },
         });
 
-        // Function to switch to fallback proxy URL seamlessly without user intervention
+        // Function to switch to next fallback proxy URL seamlessly
         const tryFallbackProxy = () => {
-          if (!usingFallback && streamData.fallbackProxyUrl) {
-            console.log('[Player] Direct stream failed; switching seamlessly to fallback proxy:', streamData.fallbackProxyUrl);
-            usingFallback = true;
-            hls.loadSource(streamData.fallbackProxyUrl);
+          const fallbackUrl = sanitizeUrl(streamData.fallbackProxyUrl);
+          if (fallbackStep === 0 && fallbackUrl && fallbackUrl !== primaryUrl) {
+            console.log('[Player] Primary stream failed; trying fallback proxy:', fallbackUrl);
+            fallbackStep = 1;
+            hls.loadSource(fallbackUrl);
+            hls.startLoad();
+            return true;
+          }
+          if (fallbackStep < 2 && primaryUrl !== guaranteedLocalProxy) {
+            console.log('[Player] Switching to guaranteed local proxy:', guaranteedLocalProxy);
+            fallbackStep = 2;
+            hls.loadSource(guaranteedLocalProxy);
             hls.startLoad();
             return true;
           }
           return false;
         };
 
-        // Try direct streamUrl first (zero serverless bandwidth)
-        hls.loadSource(streamData.streamUrl);
+        // Load primary stream URL
+        hls.loadSource(primaryUrl);
         hls.attachMedia(targetVideo);
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -168,16 +195,14 @@ export default function Player({
             data.response?.code === 403 ||
             data.response?.code === 0;
 
-          if (!usingFallback && isLoadError && streamData.fallbackProxyUrl) {
+          if (isLoadError) {
             if (tryFallbackProxy()) return;
           }
 
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
-                if (!usingFallback && streamData.fallbackProxyUrl) {
-                  if (tryFallbackProxy()) break;
-                }
+                if (tryFallbackProxy()) break;
                 console.warn('[Player] HLS network error, attempting reload...');
                 hls.startLoad();
                 break;
@@ -186,9 +211,7 @@ export default function Player({
                 hls.recoverMediaError();
                 break;
               default:
-                if (!usingFallback && streamData.fallbackProxyUrl) {
-                  if (tryFallbackProxy()) break;
-                }
+                if (tryFallbackProxy()) break;
                 hls.destroy();
                 setErrorMessage('Unable to play video stream. The media source may be offline.');
                 setIsLoading(false);
@@ -200,7 +223,7 @@ export default function Player({
         hlsRef.current = hls;
       } else if (targetVideo.canPlayType('application/vnd.apple.mpegurl')) {
         // Native HLS for Safari/iOS
-        targetVideo.src = streamData.streamUrl;
+        targetVideo.src = primaryUrl;
         targetVideo.addEventListener(
           'loadedmetadata',
           () => {
@@ -215,10 +238,9 @@ export default function Player({
         targetVideo.addEventListener(
           'error',
           () => {
-            if (!usingFallback && streamData.fallbackProxyUrl) {
-              console.log('[Player Native] Direct load failed, trying fallback proxy...');
-              usingFallback = true;
-              targetVideo.src = streamData.fallbackProxyUrl;
+            if (primaryUrl !== guaranteedLocalProxy) {
+              console.log('[Player Native] Direct load failed, trying local proxy...');
+              targetVideo.src = guaranteedLocalProxy;
               targetVideo.load();
               targetVideo.play().catch(() => {});
             } else {
