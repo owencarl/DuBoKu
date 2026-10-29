@@ -493,8 +493,8 @@ export class LibvioProvider implements BaseMediaProvider {
       : localProxyUrl;
 
     return {
-      streamUrl: effectiveProxyUrl,
-      fallbackProxyUrl: localProxyUrl,
+      streamUrl: resolvedUrl,
+      fallbackProxyUrl: effectiveProxyUrl,
       headers: {
         Referer: `${this.baseUrl}/`,
       },
