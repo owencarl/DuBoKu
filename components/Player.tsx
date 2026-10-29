@@ -90,6 +90,7 @@ export default function Player({
         streamUrl: json.data.streamUrl as string,
         fallbackProxyUrl: (json.data.fallbackProxyUrl as string) || `/api/proxy?url=${encodeURIComponent(json.data.streamUrl)}`,
         format: json.data.format as 'hls' | 'mp4' | undefined,
+        headers: json.data.headers as Record<string, string> | undefined,
       };
     } catch (err: any) {
       console.error('[Player] Stream load error:', err);
@@ -136,8 +137,13 @@ export default function Player({
         ? decodeURIComponent(streamData.streamUrl.split('url=')[1].split('&')[0])
         : streamData.streamUrl;
 
+      const customReferer =
+        streamData.headers?.Referer ||
+        streamData.headers?.referer ||
+        'https://www.dbku.tv/';
+
       const defaultWorkerProxy = 'https://duboku-proxy.liukun-tju.workers.dev';
-      const guaranteedWorkerProxy = `${defaultWorkerProxy}/?url=${encodeURIComponent(rawUrl)}&referer=https%3A%2F%2Fwww.dbku.tv%2F`;
+      const guaranteedWorkerProxy = `${defaultWorkerProxy}/?url=${encodeURIComponent(rawUrl)}&referer=${encodeURIComponent(customReferer)}`;
 
       const primaryUrl =
         sanitizeUrl(streamData.streamUrl) ||
@@ -157,11 +163,26 @@ export default function Player({
           }
           targetVideo.play().catch(() => setIsPlaying(false));
         };
+        let mp4FallbackStep = 0;
         const onError = () => {
           const fallbackUrl = sanitizeUrl(streamData.fallbackProxyUrl);
-          if (fallbackUrl && targetVideo.src !== fallbackUrl) {
-            console.log('[Player MP4] Direct load failed, trying fallback proxy:', fallbackUrl);
+          if (mp4FallbackStep === 0 && fallbackUrl && targetVideo.src !== fallbackUrl) {
+            mp4FallbackStep = 1;
+            console.log('[Player MP4] Primary load failed, trying fallback proxy:', fallbackUrl);
             targetVideo.src = fallbackUrl;
+            targetVideo.load();
+            targetVideo.play().catch(() => {});
+          } else if (mp4FallbackStep < 2 && guaranteedWorkerProxy && targetVideo.src !== guaranteedWorkerProxy) {
+            mp4FallbackStep = 2;
+            console.log('[Player MP4] Trying guaranteed Cloudflare proxy:', guaranteedWorkerProxy);
+            targetVideo.src = guaranteedWorkerProxy;
+            targetVideo.load();
+            targetVideo.play().catch(() => {});
+          } else if (mp4FallbackStep < 3) {
+            mp4FallbackStep = 3;
+            const localProxy = `/api/proxy?url=${encodeURIComponent(rawUrl)}&referer=${encodeURIComponent(customReferer)}`;
+            console.log('[Player MP4] Trying local API proxy:', localProxy);
+            targetVideo.src = localProxy;
             targetVideo.load();
             targetVideo.play().catch(() => {});
           } else {
@@ -170,7 +191,7 @@ export default function Player({
           }
         };
         targetVideo.addEventListener('loadedmetadata', onLoaded, { once: true });
-        targetVideo.addEventListener('error', onError, { once: true });
+        targetVideo.addEventListener('error', onError);
         return;
       }
 
@@ -179,9 +200,6 @@ export default function Player({
           enableWorker: true,
           lowLatencyMode: true,
           backBufferLength: 90,
-          xhrSetup: (xhr) => {
-            xhr.withCredentials = true;
-          },
         });
 
         // Function to switch to next fallback proxy URL seamlessly
@@ -194,10 +212,18 @@ export default function Player({
             hls.startLoad();
             return true;
           }
-          if (fallbackStep < 2 && primaryUrl !== guaranteedWorkerProxy) {
+          if (fallbackStep < 2 && guaranteedWorkerProxy !== primaryUrl && guaranteedWorkerProxy !== fallbackUrl) {
             console.log('[Player] Switching to guaranteed Cloudflare worker proxy:', guaranteedWorkerProxy);
             fallbackStep = 2;
             hls.loadSource(guaranteedWorkerProxy);
+            hls.startLoad();
+            return true;
+          }
+          const localProxy = `/api/proxy?url=${encodeURIComponent(rawUrl)}&referer=${encodeURIComponent(customReferer)}`;
+          if (fallbackStep < 3 && primaryUrl !== localProxy && fallbackUrl !== localProxy) {
+            console.log('[Player] Switching to local API proxy fallback:', localProxy);
+            fallbackStep = 3;
+            hls.loadSource(localProxy);
             hls.startLoad();
             return true;
           }
@@ -267,11 +293,18 @@ export default function Player({
           },
           { once: true }
         );
+        let nativeFallbackStep = 0;
         targetVideo.addEventListener(
           'error',
           () => {
-            if (primaryUrl !== guaranteedWorkerProxy) {
-              console.log('[Player Native] Direct load failed, trying Cloudflare worker proxy...');
+            const fallbackUrl = sanitizeUrl(streamData.fallbackProxyUrl);
+            if (nativeFallbackStep === 0 && fallbackUrl && targetVideo.src !== fallbackUrl) {
+              nativeFallbackStep = 1;
+              targetVideo.src = fallbackUrl;
+              targetVideo.load();
+              targetVideo.play().catch(() => {});
+            } else if (nativeFallbackStep < 2 && guaranteedWorkerProxy && targetVideo.src !== guaranteedWorkerProxy) {
+              nativeFallbackStep = 2;
               targetVideo.src = guaranteedWorkerProxy;
               targetVideo.load();
               targetVideo.play().catch(() => {});
@@ -279,8 +312,7 @@ export default function Player({
               setErrorMessage('Native video playback failed.');
               setIsLoading(false);
             }
-          },
-          { once: true }
+          }
         );
       }
     }

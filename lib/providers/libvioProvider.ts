@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio';
 import * as vm from 'vm';
 import { BaseMediaProvider } from './baseProvider';
 import { Episode, MediaCategory, MediaDetail, MediaItem, StreamResolution } from '../types';
+import { CRYPTO_JS_CODE } from '../assets/cryptoJsCode';
 
 export interface LibvioConfig {
   key?: string;
@@ -127,6 +128,10 @@ export class LibvioProvider implements BaseMediaProvider {
    */
   private async getCryptoJs(): Promise<string> {
     if (this.cryptoJsCache) return this.cryptoJsCache;
+    if (CRYPTO_JS_CODE) {
+      this.cryptoJsCache = CRYPTO_JS_CODE;
+      return this.cryptoJsCache;
+    }
     try {
       const res = await fetch(`${this.baseUrl}/static/player/artplayer/crypto-js.min.js`, {
         headers: {
@@ -369,18 +374,26 @@ export class LibvioProvider implements BaseMediaProvider {
           }
         });
 
-      const tabName = tabNames[idx] || `线路 ${idx + 1}`;
+      let tabName = $(pl).prev('.stui-vodlist__head, .stui-pannel__head').text().trim();
+      if (!tabName) {
+        tabName = tabNames[idx] || `线路 ${idx + 1}`;
+      }
       const isNetdisk = /网盘|夸克|百度|UC|阿里|下载/i.test(tabName);
       if (links.length > 0) {
         playlists.push({ tabName, isNetdisk, links });
       }
     });
 
-    // Pick best playlist: first online (non-netdisk) playlist with most episodes
-    let chosenPlaylist = playlists.find((p) => !p.isNetdisk);
-    if (!chosenPlaylist && playlists.length > 0) {
-      chosenPlaylist = playlists[0];
-    }
+    // Pick best playlist: prioritize HD2 / rrmj, then online lines with most episodes
+    const sortedPlaylists = [...playlists].sort((a, b) => {
+      if (a.isNetdisk !== b.isNetdisk) return a.isNetdisk ? 1 : -1;
+      const aIsHD2 = /HD2|rrmj/i.test(a.tabName);
+      const bIsHD2 = /HD2|rrmj/i.test(b.tabName);
+      if (aIsHD2 !== bIsHD2) return aIsHD2 ? -1 : 1;
+      return b.links.length - a.links.length;
+    });
+
+    let chosenPlaylist = sortedPlaylists[0];
 
     const episodes: Episode[] = [];
     if (chosenPlaylist) {
@@ -465,6 +478,44 @@ export class LibvioProvider implements BaseMediaProvider {
       resolvedUrl = await this.resolveArtplayerStream(artplayerUrl, playPageUrl);
     }
 
+    // 3. Failover across candidate lines if current line is offline/empty
+    if (!resolvedUrl) {
+      const epMatch = decodedEpId.match(/^(\d+)-(\d+)-(\d+)$/);
+      if (epMatch) {
+        const [_, mediaNum, currentLine, epNum] = epMatch;
+        const candidateLines = ['2', '3', '4', '1', '5', '6'].filter((l) => l !== currentLine);
+        for (const altLine of candidateLines) {
+          try {
+            const altPath = `/play/${mediaNum}-${altLine}-${epNum}.html`;
+            const altHtml = await this.fetchHtml(altPath);
+            const altMatch =
+              altHtml.match(/var\s+(?:player_aaaa|player_data|player_[a-zA-Z0-9_]+)\s*=\s*(\{[\s\S]*?\})(?:;|\s*<|\s*\n)/i) ||
+              altHtml.match(/var\s+(?:player_aaaa|player_data|player_[a-zA-Z0-9_]+)\s*=\s*(\{[\s\S]*?\})/i);
+            if (altMatch && altMatch[1]) {
+              const altData = JSON.parse(altMatch[1]);
+              if (altData.from !== 'quark' && altData.from !== 'baidu' && altData.from !== 'ucpan') {
+                if (
+                  altData.url &&
+                  (altData.url.startsWith('http://') || altData.url.startsWith('https://')) &&
+                  (altData.url.includes('.m3u8') || altData.url.includes('.mp4'))
+                ) {
+                  resolvedUrl = altData.url;
+                  break;
+                } else if (altData.url) {
+                  const altArtUrl = `${this.baseUrl}/static/player/artplayer/?url=${altData.url}`;
+                  const altPlayUrl = `${this.baseUrl}${altPath}`;
+                  resolvedUrl = await this.resolveArtplayerStream(altArtUrl, altPlayUrl);
+                  if (resolvedUrl) break;
+                }
+              }
+            }
+          } catch {
+            // Continue trying next line
+          }
+        }
+      }
+    }
+
     if (!resolvedUrl) {
       throw new Error(`[${this.name}] Unable to resolve playable stream URL for ${playPath}`);
     }
@@ -535,13 +586,17 @@ export class LibvioProvider implements BaseMediaProvider {
     let resolvedStreamUrl: string | null = null;
 
     const customFetch = async (fetchUrl: string, options: any = {}) => {
+      let fullUrl = fetchUrl;
+      if (fullUrl.startsWith('//')) fullUrl = `https:${fullUrl}`;
+      else if (fullUrl.startsWith('/')) fullUrl = `${this.baseUrl}${fullUrl}`;
+
       const headers = {
         ...(options.headers || {}),
         Origin: this.baseUrl,
         Referer: `${this.baseUrl}/static/player/artplayer/`,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       };
-      const res = await fetch(fetchUrl, { ...options, headers });
+      const res = await fetch(fullUrl, { ...options, headers });
       const text = await res.text();
       let json = {};
       try {
@@ -620,11 +675,21 @@ export class LibvioProvider implements BaseMediaProvider {
       setTimeout: (fn: any, ms: number) => setTimeout(fn, ms),
       setInterval: () => {},
       Artplayer: function (opts: any) {
-        if (opts && opts.url) resolvedStreamUrl = opts.url;
+        if (opts && opts.url && typeof opts.url === 'string' && opts.url.startsWith('http')) {
+          resolvedStreamUrl = opts.url;
+        }
+        if (opts && Array.isArray(opts.quality) && opts.quality.length > 0) {
+          const qUrl = opts.quality[0]?.url;
+          if (qUrl && typeof qUrl === 'string' && qUrl.startsWith('http')) {
+            resolvedStreamUrl = qUrl;
+          }
+        }
         return {
           on: () => {},
           switchUrl: (u: string) => {
-            resolvedStreamUrl = u;
+            if (u && typeof u === 'string' && u.startsWith('http')) {
+              resolvedStreamUrl = u;
+            }
           },
           destroy: () => {},
         };
@@ -644,7 +709,7 @@ export class LibvioProvider implements BaseMediaProvider {
     }
 
     const start = Date.now();
-    while (!resolvedStreamUrl && Date.now() - start < 5000) {
+    while (!resolvedStreamUrl && Date.now() - start < 9000) {
       await new Promise((r) => setTimeout(r, 100));
     }
 

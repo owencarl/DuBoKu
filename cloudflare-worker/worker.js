@@ -10,15 +10,20 @@
 export default {
   async fetch(request, env, ctx) {
     // 1. Handle CORS Preflight OPTIONS
+    const origin = request.headers.get('Origin') || '*';
     if (request.method === 'OPTIONS') {
+      const preflightHeaders = {
+        'Access-Control-Allow-Origin': origin,
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Max-Age': '86400',
+      };
+      if (origin !== '*') {
+        preflightHeaders['Access-Control-Allow-Credentials'] = 'true';
+      }
       return new Response(null, {
         status: 204,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-          'Access-Control-Allow-Headers': '*',
-          'Access-Control-Max-Age': '86400',
-        },
+        headers: preflightHeaders,
       });
     }
 
@@ -26,12 +31,16 @@ export default {
     const targetUrl = url.searchParams.get('url');
 
     if (!targetUrl) {
+      const errHeaders = {
+        'Access-Control-Allow-Origin': origin,
+        'Content-Type': 'text/plain',
+      };
+      if (origin !== '*') {
+        errHeaders['Access-Control-Allow-Credentials'] = 'true';
+      }
       return new Response('Missing "url" query parameter', {
         status: 400,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Content-Type': 'text/plain',
-        },
+        headers: errHeaders,
       });
     }
 
@@ -80,7 +89,10 @@ export default {
 
       // Downstream response headers with open CORS
       const responseHeaders = new Headers(upstreamResponse.headers);
-      responseHeaders.set('Access-Control-Allow-Origin', '*');
+      responseHeaders.set('Access-Control-Allow-Origin', origin);
+      if (origin !== '*') {
+        responseHeaders.set('Access-Control-Allow-Credentials', 'true');
+      }
       responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       responseHeaders.set('Access-Control-Allow-Headers', '*');
       responseHeaders.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
