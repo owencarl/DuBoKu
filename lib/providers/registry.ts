@@ -1,6 +1,7 @@
 import { BaseMediaProvider } from './baseProvider';
 import { DbkuProvider } from './dbkuProvider';
 import { MacCmsHtmlProvider } from './macCmsProvider';
+import { MacCmsApiProvider } from './macCmsApiProvider';
 import { MockMediaProvider } from './mockProvider';
 import { MediaItem, MediaSourceInfo } from '../types';
 
@@ -33,20 +34,20 @@ class ProviderRegistry {
       isDefault: true,
     });
 
-    // 2. Secondary MacCMS Source: 剧迷 (Gimy)
-    const gimy = new MacCmsHtmlProvider({
+    // 2. Secondary Source: 剧迷 (Gimy) - High-Speed MacCMS V10 API Engine
+    const gimy = new MacCmsApiProvider({
       key: 'gimy',
-      name: '剧迷 (Gimy)',
-      baseUrl: 'https://gimy.ai',
-      searchPath: '/vodsearch/-------------.html?wd=',
-      description: '海外华语影院，最新电视剧与高清电影',
+      name: '剧迷 (极速源)',
+      apiUrl: process.env.GIMY_API_URL || 'https://hhzyapi.com/api.php/provide/vod/',
+      fallbackApiUrl: 'https://lzizy1.com/api.php/provide/vod/',
+      description: '免解析秒播直连，海量电视剧、院线电影与动漫',
     });
     this.register({
       key: 'gimy',
-      name: '剧迷 (Gimy)',
+      name: '剧迷 (极速源)',
       provider: gimy,
-      baseUrl: 'https://gimy.ai',
-      description: '海外华语影院，最新电视剧与高清电影',
+      baseUrl: 'https://hhzyapi.com',
+      description: '免解析秒播直连，海量电视剧、院线电影与动漫',
     });
 
     // 3. Demo / Standalone Testing Source: 演示片库 (Public Test HLS)

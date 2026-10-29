@@ -4,6 +4,7 @@ import { providerRegistry } from './registry';
 export * from './baseProvider';
 export * from './mockProvider';
 export * from './macCmsProvider';
+export * from './macCmsApiProvider';
 export * from './dbkuProvider';
 export * from './registry';
 

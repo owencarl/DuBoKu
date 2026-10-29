@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { Search, Play, Info, Sparkles, X, Layers, Globe } from 'lucide-react';
+import { Search, Play, Info, Sparkles, X, Layers, Globe, AlertCircle, RotateCcw } from 'lucide-react';
 import BottomNav, { NavTab } from '@/components/BottomNav';
 import CategoryCarousel from '@/components/CategoryCarousel';
 import MediaDetailModal from '@/components/MediaDetailModal';
@@ -15,6 +15,7 @@ export default function HomePage() {
   const [currentTab, setCurrentTab] = useState<NavTab>('home');
   const [categories, setCategories] = useState<MediaCategory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sourceError, setSourceError] = useState<string | null>(null);
 
   // Multi-Source State
   const [sources, setSources] = useState<MediaSourceInfo[]>([]);
@@ -61,13 +62,18 @@ export default function HomePage() {
   const loadFeatured = useCallback(async (sourceKey: string) => {
     try {
       setLoading(true);
+      setSourceError(null);
+      setCategories([]);
       const res = await fetch(`/api/media/featured?source=${encodeURIComponent(sourceKey)}`);
       const json = await res.json();
-      if (json.success && json.data) {
+      if (json.success && json.data && json.data.length > 0) {
         setCategories(json.data);
+      } else {
+        setSourceError(json.error || '该片源暂无推荐内容，请尝试切换其他片源');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load categories', err);
+      setSourceError(err.message || '网络连接异常，无法加载该片源');
     } finally {
       setLoading(false);
     }
@@ -80,6 +86,8 @@ export default function HomePage() {
   const handleSourceChange = (sourceKey: string) => {
     if (sourceKey === activeSource) return;
     setActiveSource(sourceKey);
+    setCategories([]);
+    setSourceError(null);
     if (typeof window !== 'undefined') {
       localStorage.setItem('streampulse_source', sourceKey);
     }
@@ -236,64 +244,103 @@ export default function HomePage() {
         {/* --- TAB 1: HOME --- */}
         {currentTab === 'home' && (
           <div className="animate-in fade-in duration-200">
-            {/* Spotlight Hero Banner */}
-            {heroItem && (
-              <div className="relative aspect-[16/10] md:aspect-[21/9] w-full bg-neutral-950 mb-6 overflow-hidden">
-                <Image
-                  src={heroItem.backdrop || heroItem.poster}
-                  alt={heroItem.title}
-                  fill
-                  priority
-                  className="object-cover opacity-85"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/40 to-transparent" />
+            {/* Loading Skeleton / Spinner */}
+            {loading && (
+              <div className="flex flex-col items-center justify-center py-28 space-y-3">
+                <div className="w-10 h-10 border-3 border-primary border-t-transparent rounded-full animate-spin" />
+                <p className="text-xs text-neutral-400 font-medium">正在加载片源内容...</p>
+              </div>
+            )}
 
-                <div className="absolute bottom-4 inset-x-4">
-                  <span className="inline-flex items-center space-x-1 text-[11px] font-semibold text-primary bg-primary/20 border border-primary/30 px-2 py-0.5 rounded-full mb-1.5 backdrop-blur-xs">
-                    <Sparkles className="w-3 h-3" />
-                    <span>Editor’s Pick</span>
-                  </span>
-                  <h2 className="text-xl md:text-2xl font-black text-white leading-tight drop-shadow-md">
-                    {heroItem.title}
-                  </h2>
-                  <p className="text-xs text-neutral-300 line-clamp-2 mt-1 max-w-lg drop-shadow">
-                    {heroItem.description}
+            {/* Error State */}
+            {sourceError && !loading && (
+              <div className="mx-4 my-10 p-6 rounded-2xl bg-neutral-900/90 border border-neutral-800 text-center space-y-4">
+                <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center mx-auto">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-white">片源加载异常</h3>
+                  <p className="text-xs text-neutral-400 max-w-sm mx-auto leading-relaxed">
+                    {sourceError}
                   </p>
-
-                  <div className="flex items-center space-x-3 mt-3">
+                </div>
+                <div className="flex items-center justify-center gap-2 pt-2">
+                  <button
+                    onClick={() => loadFeatured(activeSource)}
+                    className="flex items-center space-x-1.5 px-4 py-2 rounded-full bg-primary hover:bg-primary-hover active:scale-95 text-xs font-bold text-white transition shadow-sm"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>重新加载</span>
+                  </button>
+                  {activeSource !== 'dbku' && (
                     <button
-                      onClick={() => handleWatchNow(heroItem.id)}
-                      className="flex items-center space-x-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white px-4 py-2 rounded-full text-xs font-bold shadow-md shadow-primary/30 transition"
+                      onClick={() => handleSourceChange('dbku')}
+                      className="px-4 py-2 rounded-full bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-xs font-semibold text-neutral-300 border border-neutral-700 transition"
                     >
-                      <Play className="w-3.5 h-3.5 fill-white" />
-                      <span>Watch Now</span>
+                      切回独播库
                     </button>
-                    <button
-                      onClick={() => setSelectedMediaId(heroItem.id)}
-                      className="flex items-center space-x-1.5 bg-neutral-800/80 hover:bg-neutral-800 active:scale-95 text-neutral-200 px-3.5 py-2 rounded-full text-xs font-semibold backdrop-blur-xs border border-white/10 transition"
-                    >
-                      <Info className="w-3.5 h-3.5" />
-                      <span>Details</span>
-                    </button>
-                  </div>
+                  )}
                 </div>
               </div>
             )}
 
-            {/* Category Carousels */}
-            {loading ? (
-              <div className="flex items-center justify-center py-20">
-                <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : (
-              categories.map((cat) => (
-                <CategoryCarousel
-                  key={cat.id}
-                  title={cat.title}
-                  items={cat.items}
-                  onSelectMedia={(item) => setSelectedMediaId(item.id)}
-                />
-              ))
+            {/* Content Display */}
+            {!loading && !sourceError && (
+              <>
+                {/* Spotlight Hero Banner */}
+                {heroItem && (
+                  <div className="relative aspect-[16/10] md:aspect-[21/9] w-full bg-neutral-950 mb-6 overflow-hidden">
+                    <Image
+                      src={heroItem.backdrop || heroItem.poster}
+                      alt={heroItem.title}
+                      fill
+                      priority
+                      className="object-cover opacity-85"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/40 to-transparent" />
+
+                    <div className="absolute bottom-4 inset-x-4">
+                      <span className="inline-flex items-center space-x-1 text-[11px] font-semibold text-primary bg-primary/20 border border-primary/30 px-2 py-0.5 rounded-full mb-1.5 backdrop-blur-xs">
+                        <Sparkles className="w-3 h-3" />
+                        <span>Editor’s Pick</span>
+                      </span>
+                      <h2 className="text-xl md:text-2xl font-black text-white leading-tight drop-shadow-md">
+                        {heroItem.title}
+                      </h2>
+                      <p className="text-xs text-neutral-300 line-clamp-2 mt-1 max-w-lg drop-shadow">
+                        {heroItem.description}
+                      </p>
+
+                      <div className="flex items-center space-x-3 mt-3">
+                        <button
+                          onClick={() => handleWatchNow(heroItem.id)}
+                          className="flex items-center space-x-1.5 bg-primary hover:bg-primary-hover active:scale-95 text-white px-4 py-2 rounded-full text-xs font-bold shadow-md shadow-primary/30 transition"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-white" />
+                          <span>Watch Now</span>
+                        </button>
+                        <button
+                          onClick={() => setSelectedMediaId(heroItem.id)}
+                          className="flex items-center space-x-1.5 bg-neutral-800/80 hover:bg-neutral-800 active:scale-95 text-neutral-200 px-3.5 py-2 rounded-full text-xs font-semibold backdrop-blur-xs border border-white/10 transition"
+                        >
+                          <Info className="w-3.5 h-3.5" />
+                          <span>Details</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Category Carousels */}
+                {categories.map((cat) => (
+                  <CategoryCarousel
+                    key={cat.id}
+                    title={cat.title}
+                    items={cat.items}
+                    onSelectMedia={(item) => setSelectedMediaId(item.id)}
+                  />
+                ))}
+              </>
             )}
           </div>
         )}
