@@ -2,6 +2,7 @@ import { BaseMediaProvider } from './baseProvider';
 import { DbkuProvider } from './dbkuProvider';
 import { MacCmsHtmlProvider } from './macCmsProvider';
 import { MacCmsApiProvider } from './macCmsApiProvider';
+import { LibvioProvider } from './libvioProvider';
 import { MockMediaProvider } from './mockProvider';
 import { MediaItem, MediaSourceInfo } from '../types';
 
@@ -51,24 +52,23 @@ class ProviderRegistry {
     });
 
     // 3. Tertiary Source: LIBVIO (利博影视)
-    const libvio = new MacCmsHtmlProvider({
+    const libvio = new LibvioProvider({
       key: 'libvio',
       name: 'LIBVIO (利博影视)',
-      baseUrl: process.env.LIBVIO_BASE_URL || 'https://www.libvio.to',
+      baseUrl: process.env.LIBVIO_BASE_URL || 'https://www.libvio.lat',
       fallbackUrls: [
+        'https://www.libvio.lat',
         'https://libvio.host',
-        'https://libviobd.com',
-        'https://www.libvio.pw',
         'https://libvio.app',
+        'https://libvio.pw',
       ],
-      searchPath: '/search/-------------.html?wd=',
       description: '热门华语影视、高清欧美日韩剧集与动漫',
     });
     this.register({
       key: 'libvio',
       name: 'LIBVIO (利博影视)',
       provider: libvio,
-      baseUrl: 'https://www.libvio.to',
+      baseUrl: 'https://www.libvio.lat',
       description: '热门华语影视、高清欧美日韩剧集与动漫',
     });
   }

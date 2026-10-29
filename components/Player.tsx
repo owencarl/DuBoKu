@@ -89,6 +89,7 @@ export default function Player({
       return {
         streamUrl: json.data.streamUrl as string,
         fallbackProxyUrl: (json.data.fallbackProxyUrl as string) || `/api/proxy?url=${encodeURIComponent(json.data.streamUrl)}`,
+        format: json.data.format as 'hls' | 'mp4' | undefined,
       };
     } catch (err: any) {
       console.error('[Player] Stream load error:', err);
@@ -141,6 +142,36 @@ export default function Player({
         sanitizeUrl(streamData.streamUrl) ||
         sanitizeUrl(streamData.fallbackProxyUrl) ||
         guaranteedLocalProxy;
+
+      const isMp4 = streamData.format === 'mp4' || rawUrl.toLowerCase().includes('.mp4');
+
+      if (isMp4) {
+        targetVideo.src = primaryUrl;
+        targetVideo.load();
+        const onLoaded = () => {
+          setIsLoading(false);
+          setErrorMessage(null);
+          if (resumeTime > 5) {
+            targetVideo.currentTime = resumeTime;
+          }
+          targetVideo.play().catch(() => setIsPlaying(false));
+        };
+        const onError = () => {
+          const fallbackUrl = sanitizeUrl(streamData.fallbackProxyUrl);
+          if (fallbackUrl && targetVideo.src !== fallbackUrl) {
+            console.log('[Player MP4] Direct load failed, trying fallback proxy:', fallbackUrl);
+            targetVideo.src = fallbackUrl;
+            targetVideo.load();
+            targetVideo.play().catch(() => {});
+          } else {
+            setErrorMessage('Unable to play video stream.');
+            setIsLoading(false);
+          }
+        };
+        targetVideo.addEventListener('loadedmetadata', onLoaded, { once: true });
+        targetVideo.addEventListener('error', onError, { once: true });
+        return;
+      }
 
       if (Hls.isSupported()) {
         const hls = new Hls({

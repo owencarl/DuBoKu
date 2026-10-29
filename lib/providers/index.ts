@@ -5,6 +5,7 @@ export * from './baseProvider';
 export * from './mockProvider';
 export * from './macCmsProvider';
 export * from './macCmsApiProvider';
+export * from './libvioProvider';
 export * from './dbkuProvider';
 export * from './registry';
 
