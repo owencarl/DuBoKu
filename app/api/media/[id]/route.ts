@@ -1,21 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mediaProvider } from '@/lib/providers';
+import { providerRegistry } from '@/lib/providers';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } | Promise<{ id: string }> }
 ) {
   try {
     const { id } = await Promise.resolve(params);
-    console.log(`[API /api/media/[id]] Incoming requested ID:`, id);
+    const { searchParams } = new URL(request.url);
+    const sourceParam = searchParams.get('source') || undefined;
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Missing ID parameter' }, { status: 400 });
     }
 
-    const item = await mediaProvider.getDetails(id);
+    const { sourceKey, rawId } = providerRegistry.parseSourceAndId(id, sourceParam);
+    const provider = providerRegistry.getProvider(sourceKey);
+    console.log(`[API /api/media/[id]] Using provider "${sourceKey}" for ID:`, rawId);
+
+    const item = await provider.getDetails(rawId);
     return NextResponse.json(
       { success: true, data: item },
       {

@@ -1,11 +1,15 @@
-import { NextResponse } from 'next/server';
-import { mediaProvider } from '@/lib/providers';
+import { NextRequest, NextResponse } from 'next/server';
+import { providerRegistry } from '@/lib/providers';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const categories = await mediaProvider.getFeatured();
+    const { searchParams } = new URL(request.url);
+    const source = searchParams.get('source') || undefined;
+    const provider = providerRegistry.getProvider(source);
+    const categories = await provider.getFeatured();
+
     return NextResponse.json(
       { success: true, data: categories },
       {

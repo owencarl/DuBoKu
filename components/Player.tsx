@@ -80,7 +80,7 @@ export default function Player({
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const res = await fetch(`/api/media/stream/${episodeId}`);
+      const res = await fetch(`/api/media/stream/${encodeURIComponent(episodeId)}`);
       const json = await res.json();
       if (!json.success || !json.data?.streamUrl) {
         throw new Error(json.error || 'Failed to resolve stream URL from server.');

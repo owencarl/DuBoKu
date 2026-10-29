@@ -1,20 +1,25 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Image from 'next/image';
-import { Search, Play, Info, Sparkles, X } from 'lucide-react';
+import { Search, Play, Info, Sparkles, X, Layers, Globe } from 'lucide-react';
 import BottomNav, { NavTab } from '@/components/BottomNav';
 import CategoryCarousel from '@/components/CategoryCarousel';
 import MediaDetailModal from '@/components/MediaDetailModal';
 import WatchHistoryView from '@/components/WatchHistoryView';
 import Player from '@/components/Player';
-import { MediaCategory, MediaDetail, MediaItem, Episode } from '@/lib/types';
+import { MediaCategory, MediaDetail, MediaItem, Episode, MediaSourceInfo } from '@/lib/types';
 import { getWatchHistory } from '@/lib/storage';
 
 export default function HomePage() {
   const [currentTab, setCurrentTab] = useState<NavTab>('home');
   const [categories, setCategories] = useState<MediaCategory[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Multi-Source State
+  const [sources, setSources] = useState<MediaSourceInfo[]>([]);
+  const [activeSource, setActiveSource] = useState<string>('dbku');
+  const [searchSource, setSearchSource] = useState<string>('all');
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,26 +34,58 @@ export default function HomePage() {
   const [playingMedia, setPlayingMedia] = useState<MediaDetail | null>(null);
   const [playingEpisode, setPlayingEpisode] = useState<Episode | null>(null);
 
-  // Load initial featured categories
+  // Load available sources on mount & restore user's preferred source
   useEffect(() => {
-    async function loadFeatured() {
+    async function initSources() {
       try {
-        setLoading(true);
-        const res = await fetch('/api/media/featured');
+        const res = await fetch('/api/sources');
         const json = await res.json();
-        if (json.success && json.data) {
-          setCategories(json.data);
+        if (json.success && Array.isArray(json.data)) {
+          setSources(json.data);
         }
       } catch (err) {
-        console.error('Failed to load categories', err);
-      } finally {
-        setLoading(false);
+        console.error('Failed to load sources', err);
       }
     }
-    loadFeatured();
+
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('streampulse_source');
+      if (saved) {
+        setActiveSource(saved);
+      }
+    }
+    initSources();
   }, []);
 
-  // Debounced search
+  // Fetch featured categories for active source
+  const loadFeatured = useCallback(async (sourceKey: string) => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/media/featured?source=${encodeURIComponent(sourceKey)}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setCategories(json.data);
+      }
+    } catch (err) {
+      console.error('Failed to load categories', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFeatured(activeSource);
+  }, [activeSource, loadFeatured]);
+
+  const handleSourceChange = (sourceKey: string) => {
+    if (sourceKey === activeSource) return;
+    setActiveSource(sourceKey);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('streampulse_source', sourceKey);
+    }
+  };
+
+  // Debounced search with multi-source aggregated support
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSearchResults([]);
@@ -58,7 +95,8 @@ export default function HomePage() {
     const handler = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const res = await fetch(`/api/media/search?q=${encodeURIComponent(searchQuery.trim())}`);
+        const sourceParam = searchSource ? `&source=${encodeURIComponent(searchSource)}` : '';
+        const res = await fetch(`/api/media/search?q=${encodeURIComponent(searchQuery.trim())}${sourceParam}`);
         const json = await res.json();
         if (json.success && json.data) {
           setSearchResults(json.data);
@@ -71,7 +109,7 @@ export default function HomePage() {
     }, 250);
 
     return () => clearTimeout(handler);
-  }, [searchQuery]);
+  }, [searchQuery, searchSource]);
 
   // Handle Play Episode
   const handlePlayEpisode = (media: MediaDetail, episode: Episode) => {
@@ -100,7 +138,7 @@ export default function HomePage() {
   // Resume from History
   const handleResumeFromHistory = async (mediaId: string, episodeId: string) => {
     try {
-      const res = await fetch(`/api/media/${mediaId}`);
+      const res = await fetch(`/api/media/${encodeURIComponent(mediaId)}`);
       const json = await res.json();
       if (json.success && json.data) {
         const detail: MediaDetail = json.data;
@@ -116,7 +154,7 @@ export default function HomePage() {
   // Watch Now from Hero Spotlight
   const handleWatchNow = async (mediaId: string) => {
     try {
-      const res = await fetch(`/api/media/${mediaId}`);
+      const res = await fetch(`/api/media/${encodeURIComponent(mediaId)}`);
       const json = await res.json();
       if (json.success && json.data) {
         const detail: MediaDetail = json.data;
@@ -164,6 +202,34 @@ export default function HomePage() {
           <Search className="w-4 h-4" />
         </button>
       </header>
+
+      {/* Source Selector Bar on Home Screen */}
+      {currentTab === 'home' && sources.length > 0 && (
+        <div className="bg-neutral-950/80 border-b border-neutral-900/80 px-4 py-2 flex items-center justify-between overflow-x-auto scrollbar-none z-20 sticky top-[57px] backdrop-blur-md">
+          <div className="flex items-center space-x-1.5 shrink-0 text-neutral-400 mr-2">
+            <Layers className="w-3.5 h-3.5 text-primary" />
+            <span className="text-[11px] font-semibold tracking-wide uppercase">Source</span>
+          </div>
+          <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none">
+            {sources.map((s) => {
+              const isActive = activeSource === s.key;
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => handleSourceChange(s.key)}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition active:scale-95 flex items-center space-x-1.5 ${
+                    isActive
+                      ? 'bg-primary text-white shadow-sm shadow-primary/30 font-bold'
+                      : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-neutral-200 border border-neutral-800'
+                  }`}
+                >
+                  <span>{s.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Main Tab Content */}
       <main className="flex-1 pb-20">
@@ -296,7 +362,7 @@ export default function HomePage() {
         {currentTab === 'search' && (
           <div className="px-4 py-3 animate-in fade-in duration-200">
             {/* Search Input Box */}
-            <div className="relative mb-4">
+            <div className="relative mb-3">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
               <input
                 type="text"
@@ -314,6 +380,34 @@ export default function HomePage() {
                   <X className="w-4 h-4" />
                 </button>
               )}
+            </div>
+
+            {/* Multi-Source Aggregated Search Filter Pills */}
+            <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none pb-2 mb-3">
+              <button
+                onClick={() => setSearchSource('all')}
+                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition active:scale-95 flex items-center space-x-1 ${
+                  searchSource === 'all'
+                    ? 'bg-primary text-white shadow-sm shadow-primary/30 font-bold'
+                    : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-400 border border-neutral-800'
+                }`}
+              >
+                <Globe className="w-3 h-3" />
+                <span>全网聚合</span>
+              </button>
+              {sources.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => setSearchSource(s.key)}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition active:scale-95 ${
+                    searchSource === s.key
+                      ? 'bg-primary text-white shadow-sm shadow-primary/30 font-bold'
+                      : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-400 border border-neutral-800'
+                  }`}
+                >
+                  {s.name}
+                </button>
+              ))}
             </div>
 
             {/* Results or Empty State */}
@@ -341,6 +435,16 @@ export default function HomePage() {
                           sizes="130px"
                           className="object-cover"
                         />
+                        {item.sourceName && (
+                          <div className="absolute top-1.5 right-1.5 bg-black/80 backdrop-blur-xs border border-white/10 text-[9px] font-bold text-primary px-1.5 py-0.5 rounded shadow">
+                            {item.sourceName}
+                          </div>
+                        )}
+                        {item.status && (
+                          <div className="absolute bottom-1.5 left-1.5 bg-black/70 backdrop-blur-xs text-[9px] font-medium text-neutral-200 px-1 py-0.5 rounded">
+                            {item.status}
+                          </div>
+                        )}
                       </div>
                       <h4 className="text-xs font-semibold text-neutral-200 line-clamp-1 mt-1.5 group-hover:text-primary">
                         {item.title}

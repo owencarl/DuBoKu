@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mediaProvider } from '@/lib/providers';
+import { providerRegistry } from '@/lib/providers';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const q = searchParams.get('q') || '';
+  const source = searchParams.get('source') || 'all';
 
   try {
-    const results = await mediaProvider.search(q);
+    let results;
+    if (source && source !== 'all') {
+      const provider = providerRegistry.getProvider(source);
+      results = await provider.search(q);
+    } else {
+      // Parallel aggregated search across all registered sources
+      results = await providerRegistry.searchAll(q);
+    }
+
     return NextResponse.json(
       { success: true, data: results },
       {

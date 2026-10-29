@@ -30,7 +30,7 @@ export default function MediaDetailModal({
       try {
         setLoading(true);
         setError(null);
-        const res = await fetch(`/api/media/${mediaId}`);
+        const res = await fetch(`/api/media/${encodeURIComponent(mediaId)}`);
         const json = await res.json();
         if (active) {
           if (json.success && json.data) {

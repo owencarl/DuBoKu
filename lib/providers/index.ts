@@ -1,11 +1,12 @@
 import { BaseMediaProvider } from './baseProvider';
-import { DbkuProvider } from './dbkuProvider';
-import { MockMediaProvider, defaultProvider } from './mockProvider';
+import { providerRegistry } from './registry';
 
 export * from './baseProvider';
 export * from './mockProvider';
+export * from './macCmsProvider';
 export * from './dbkuProvider';
+export * from './registry';
 
-// Primary active singleton media provider
-export const mediaProvider: BaseMediaProvider = new DbkuProvider();
-export const fallbackProvider: BaseMediaProvider = defaultProvider;
+// Default active singleton media provider for backward compatibility
+export const mediaProvider: BaseMediaProvider = providerRegistry.getProvider();
+export const fallbackProvider: BaseMediaProvider = providerRegistry.getProvider('mock');

@@ -8,6 +8,15 @@ export interface MediaItem {
   year?: string;
   category?: string;
   description?: string;
+  source?: string;
+  sourceName?: string;
+}
+
+export interface MediaSourceInfo {
+  key: string;
+  name: string;
+  baseUrl?: string;
+  description?: string;
 }
 
 export interface Episode {

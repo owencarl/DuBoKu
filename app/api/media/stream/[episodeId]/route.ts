@@ -1,23 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mediaProvider } from '@/lib/providers';
+import { providerRegistry } from '@/lib/providers';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { episodeId: string } | Promise<{ episodeId: string }> }
 ) {
   try {
     const { episodeId } = await Promise.resolve(params);
-    console.log(`[API /api/media/stream] Incoming requested episodeId:`, episodeId);
+    const { searchParams } = new URL(request.url);
+    const sourceParam = searchParams.get('source') || undefined;
 
     if (!episodeId) {
       return NextResponse.json({ success: false, error: 'Missing episodeId parameter' }, { status: 400 });
     }
 
-    const stream = await mediaProvider.resolveStreamUrl(episodeId);
-    console.log(`[API /api/media/stream] Resolved streamUrl for ${episodeId}:`, stream.streamUrl);
+    const { sourceKey, rawId } = providerRegistry.parseSourceAndId(episodeId, sourceParam);
+    const provider = providerRegistry.getProvider(sourceKey);
+    console.log(`[API /api/media/stream] Using provider "${sourceKey}" for episodeId:`, rawId);
 
+    const stream = await provider.resolveStreamUrl(rawId);
     return NextResponse.json({ success: true, data: stream });
   } catch (error: any) {
     console.error(`[API /api/media/stream] Stream resolution error:`, error.message);
