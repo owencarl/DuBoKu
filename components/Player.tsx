@@ -57,13 +57,21 @@ export default function Player({
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showEpisodeSheet, setShowEpisodeSheet] = useState(false);
 
-  // Double tap feedback
-  const [tapFeedback, setTapFeedback] = useState<{ side: 'left' | 'right'; show: boolean }>({
+  // Swipe and Double-tap seek feedback
+  const [tapFeedback, setTapFeedback] = useState<{
+    side: 'left' | 'right';
+    show: boolean;
+    text?: string;
+  }>({
     side: 'left',
     show: false,
+    text: '-10s',
   });
 
   const lastTapRef = useRef<{ time: number; x: number }>({ time: 0, x: 0 });
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const isSwipeGestureRef = useRef<boolean>(false);
+  const feedbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSaveTimeRef = useRef<number>(0);
 
@@ -359,36 +367,104 @@ export default function Player({
     resetControlsTimer();
   };
 
-  // Double-tap skip gesture
-  const handleTouchScreen = (e: React.TouchEvent<HTMLDivElement>) => {
-    const now = Date.now();
-    const touch = e.touches[0] || e.changedTouches[0];
-    const rect = e.currentTarget.getBoundingClientRect();
-    const touchX = touch.clientX - rect.left;
-    const isLeft = touchX < rect.width / 2;
+  // Trigger visual seek HUD feedback (+10s / -10s)
+  const triggerSeekFeedback = (direction: 'forward' | 'backward', seconds: number = 10) => {
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current);
+    }
+    setTapFeedback({
+      side: direction === 'forward' ? 'right' : 'left',
+      show: true,
+      text: direction === 'forward' ? `+${seconds}s` : `-${seconds}s`,
+    });
+    feedbackTimeoutRef.current = setTimeout(() => {
+      setTapFeedback((prev) => ({ ...prev, show: false }));
+    }, 800);
+  };
 
-    const timeSinceLastTap = now - lastTapRef.current.time;
-    const distSinceLastTap = Math.abs(touchX - lastTapRef.current.x);
+  // Touch Start: track initial position & time
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    const touch = e.touches[0];
+    touchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now(),
+    };
+    isSwipeGestureRef.current = false;
+  };
 
-    if (timeSinceLastTap < 300 && distSinceLastTap < 100) {
-      // Trigger double tap
-      if (isLeft) {
-        seekRelative(-10);
-        setTapFeedback({ side: 'left', show: true });
-      } else {
+  // Touch Move: identify if user is executing a horizontal swipe gesture
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!touchStartRef.current) return;
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+
+    // Detect horizontal swipe intention
+    if (Math.abs(deltaX) > 25 && Math.abs(deltaX) > Math.abs(deltaY) * 1.3) {
+      isSwipeGestureRef.current = true;
+    }
+  };
+
+  // Touch End: trigger swipe fast forward (+10s) / rewind (-10s) or tap / double-tap
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+    const deltaTime = Date.now() - touchStartRef.current.time;
+
+    const isHorizontalSwipe =
+      (isSwipeGestureRef.current || Math.abs(deltaX) >= 40) &&
+      Math.abs(deltaX) > Math.abs(deltaY) * 1.2;
+
+    if (isHorizontalSwipe) {
+      // Swipe Right -> Fast forward 10s
+      if (deltaX > 0) {
         seekRelative(10);
-        setTapFeedback({ side: 'right', show: true });
+        triggerSeekFeedback('forward', 10);
+      }
+      // Swipe Left -> Rewind 10s
+      else {
+        seekRelative(-10);
+        triggerSeekFeedback('backward', 10);
       }
 
-      setTimeout(() => {
-        setTapFeedback((prev) => ({ ...prev, show: false }));
-      }, 700);
-
+      // Reset tap tracking to avoid accidental tap after swipe
       lastTapRef.current = { time: 0, x: 0 };
-    } else {
-      lastTapRef.current = { time: now, x: touchX };
-      resetControlsTimer();
+      touchStartRef.current = null;
+      isSwipeGestureRef.current = false;
+      return;
     }
+
+    // Tap / Double-tap handling
+    if (Math.abs(deltaX) < 15 && Math.abs(deltaY) < 15 && deltaTime < 400) {
+      const now = Date.now();
+      const rect = e.currentTarget.getBoundingClientRect();
+      const touchX = touch.clientX - rect.left;
+      const isLeft = touchX < rect.width / 2;
+
+      const timeSinceLastTap = now - lastTapRef.current.time;
+      const distSinceLastTap = Math.abs(touchX - lastTapRef.current.x);
+
+      if (timeSinceLastTap < 300 && distSinceLastTap < 100) {
+        // Double-tap
+        if (isLeft) {
+          seekRelative(-10);
+          triggerSeekFeedback('backward', 10);
+        } else {
+          seekRelative(10);
+          triggerSeekFeedback('forward', 10);
+        }
+        lastTapRef.current = { time: 0, x: 0 };
+      } else {
+        lastTapRef.current = { time: now, x: touchX };
+        resetControlsTimer();
+      }
+    }
+
+    touchStartRef.current = null;
+    isSwipeGestureRef.current = false;
   };
 
   // Listen to fullscreenchange to keep state synced & unlock orientation when leaving
@@ -525,8 +601,10 @@ export default function Player({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-50 flex flex-col bg-black text-white select-none overflow-hidden"
-      onTouchStart={handleTouchScreen}
+      className="fixed inset-0 z-50 flex flex-col bg-black text-white select-none overflow-hidden touch-none"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       onClick={resetControlsTimer}
     >
       {/* Video Element */}
@@ -544,27 +622,47 @@ export default function Player({
         }}
       />
 
-      {/* Double Tap Visual Indicator Animation */}
+      {/* Swipe & Double-Tap Visual Seek Feedback */}
       {tapFeedback.show && (
-        <div
-          className={`absolute inset-y-0 ${
-            tapFeedback.side === 'left' ? 'left-0' : 'right-0'
-          } w-1/3 flex items-center justify-center pointer-events-none bg-white/10 backdrop-blur-xs transition-opacity duration-300`}
-        >
-          <div className="flex flex-col items-center animate-pulse text-white">
-            {tapFeedback.side === 'left' ? (
-              <>
-                <RotateCcw className="w-12 h-12 mb-1" />
-                <span className="text-sm font-semibold">-10s</span>
-              </>
-            ) : (
-              <>
-                <RotateCw className="w-12 h-12 mb-1" />
-                <span className="text-sm font-semibold">+10s</span>
-              </>
-            )}
+        <>
+          {/* Side Ripple Accent */}
+          <div
+            className={`absolute inset-y-0 ${
+              tapFeedback.side === 'left' ? 'left-0' : 'right-0'
+            } w-1/3 flex items-center justify-center pointer-events-none bg-white/10 backdrop-blur-xs transition-opacity duration-300 z-20`}
+          >
+            <div className="flex flex-col items-center animate-pulse text-white">
+              {tapFeedback.side === 'left' ? (
+                <>
+                  <RotateCcw className="w-12 h-12 mb-1" />
+                  <span className="text-sm font-semibold">{tapFeedback.text || '-10s'}</span>
+                </>
+              ) : (
+                <>
+                  <RotateCw className="w-12 h-12 mb-1" />
+                  <span className="text-sm font-semibold">{tapFeedback.text || '+10s'}</span>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+
+          {/* Center Floating Pill Badge for Instant Clarity */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+            <div className="flex items-center space-x-2.5 px-6 py-3 rounded-full bg-black/85 backdrop-blur-md border border-white/20 text-white shadow-2xl animate-in zoom-in-95 duration-150">
+              {tapFeedback.side === 'right' ? (
+                <>
+                  <RotateCw className="w-6 h-6 text-primary" />
+                  <span className="text-base font-bold tracking-wide">{tapFeedback.text || '+10s'}</span>
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-6 h-6 text-primary" />
+                  <span className="text-base font-bold tracking-wide">{tapFeedback.text || '-10s'}</span>
+                </>
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       {/* Loading Spinner */}
@@ -610,6 +708,8 @@ export default function Player({
 
       {/* Top Bar Controls */}
       <div
+        onTouchStart={(e) => e.stopPropagation()}
+        onTouchEnd={(e) => e.stopPropagation()}
         className={`absolute top-0 inset-x-0 bg-gradient-to-b from-black/80 via-black/40 to-transparent p-4 flex items-center justify-between transition-opacity duration-300 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
@@ -706,9 +806,12 @@ export default function Player({
         }`}
       >
         <button
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             seekRelative(-10);
+            triggerSeekFeedback('backward', 10);
           }}
           className="pointer-events-auto p-3 rounded-full bg-black/40 hover:bg-white/20 active:scale-90 transition backdrop-blur-xs"
           aria-label="Skip backward 10s"
@@ -717,6 +820,8 @@ export default function Player({
         </button>
 
         <button
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             togglePlay();
@@ -728,9 +833,12 @@ export default function Player({
         </button>
 
         <button
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
             seekRelative(10);
+            triggerSeekFeedback('forward', 10);
           }}
           className="pointer-events-auto p-3 rounded-full bg-black/40 hover:bg-white/20 active:scale-90 transition backdrop-blur-xs"
           aria-label="Skip forward 10s"
@@ -741,6 +849,8 @@ export default function Player({
 
       {/* Bottom Controls & Progress Bar */}
       <div
+        onTouchStart={(e) => e.stopPropagation()}
+        onTouchEnd={(e) => e.stopPropagation()}
         className={`absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent px-4 pb-6 pt-8 transition-opacity duration-300 ${
           showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
