@@ -221,8 +221,24 @@ export class MacCmsApiProvider implements BaseMediaProvider {
       throw new Error(`[${this.name}] Could not resolve stream URL for episode: ${episodeId}`);
     }
 
-    // Direct HLS stream with zero-bandwidth fallback
-    const fallbackProxyUrl = `/api/proxy?url=${encodeURIComponent(streamUrl)}`;
+    const defaultProxy = 'https://duboku-proxy.liukun-tju.workers.dev';
+    let externalProxy =
+      process.env.STREAM_PROXY_URL ||
+      process.env.NEXT_PUBLIC_STREAM_PROXY_URL ||
+      defaultProxy;
+
+    if (
+      externalProxy &&
+      (externalProxy.includes('yourname') || externalProxy.includes('example') || !externalProxy.startsWith('http'))
+    ) {
+      externalProxy = defaultProxy;
+    }
+
+    // Direct HLS stream with zero-bandwidth Cloudflare Worker fallback
+    const fallbackProxyUrl = externalProxy
+      ? `${externalProxy.replace(/\/$/, '')}${externalProxy.includes('?') ? '&' : '/?'}url=${encodeURIComponent(streamUrl)}`
+      : `/api/proxy?url=${encodeURIComponent(streamUrl)}`;
+
     return {
       streamUrl,
       fallbackProxyUrl,

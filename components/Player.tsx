@@ -136,12 +136,13 @@ export default function Player({
         ? decodeURIComponent(streamData.streamUrl.split('url=')[1].split('&')[0])
         : streamData.streamUrl;
 
-      const guaranteedLocalProxy = `/api/proxy?url=${encodeURIComponent(rawUrl)}&referer=https%3A%2F%2Fwww.dbku.tv%2F`;
+      const defaultWorkerProxy = 'https://duboku-proxy.liukun-tju.workers.dev';
+      const guaranteedWorkerProxy = `${defaultWorkerProxy}/?url=${encodeURIComponent(rawUrl)}&referer=https%3A%2F%2Fwww.dbku.tv%2F`;
 
       const primaryUrl =
         sanitizeUrl(streamData.streamUrl) ||
         sanitizeUrl(streamData.fallbackProxyUrl) ||
-        guaranteedLocalProxy;
+        guaranteedWorkerProxy;
 
       const isMp4 = streamData.format === 'mp4' || rawUrl.toLowerCase().includes('.mp4');
 
@@ -193,10 +194,10 @@ export default function Player({
             hls.startLoad();
             return true;
           }
-          if (fallbackStep < 2 && primaryUrl !== guaranteedLocalProxy) {
-            console.log('[Player] Switching to guaranteed local proxy:', guaranteedLocalProxy);
+          if (fallbackStep < 2 && primaryUrl !== guaranteedWorkerProxy) {
+            console.log('[Player] Switching to guaranteed Cloudflare worker proxy:', guaranteedWorkerProxy);
             fallbackStep = 2;
-            hls.loadSource(guaranteedLocalProxy);
+            hls.loadSource(guaranteedWorkerProxy);
             hls.startLoad();
             return true;
           }
@@ -269,9 +270,9 @@ export default function Player({
         targetVideo.addEventListener(
           'error',
           () => {
-            if (primaryUrl !== guaranteedLocalProxy) {
-              console.log('[Player Native] Direct load failed, trying local proxy...');
-              targetVideo.src = guaranteedLocalProxy;
+            if (primaryUrl !== guaranteedWorkerProxy) {
+              console.log('[Player Native] Direct load failed, trying Cloudflare worker proxy...');
+              targetVideo.src = guaranteedWorkerProxy;
               targetVideo.load();
               targetVideo.play().catch(() => {});
             } else {

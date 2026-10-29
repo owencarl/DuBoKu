@@ -524,7 +524,11 @@ export class MacCmsHtmlProvider implements BaseMediaProvider {
     console.log(`[${this.name}] Resolved raw stream URL for ${playPath}:`, rawStreamUrl);
 
     const isMp4 = rawStreamUrl.toLowerCase().includes('.mp4');
-    let externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+    const defaultProxy = 'https://duboku-proxy.liukun-tju.workers.dev';
+    let externalProxy =
+      process.env.STREAM_PROXY_URL ||
+      process.env.NEXT_PUBLIC_STREAM_PROXY_URL ||
+      defaultProxy;
 
     // Ignore placeholder / dummy URLs like 'yourname' or 'example'
     if (
@@ -533,7 +537,7 @@ export class MacCmsHtmlProvider implements BaseMediaProvider {
         externalProxy.includes('example') ||
         !externalProxy.startsWith('http'))
     ) {
-      externalProxy = undefined;
+      externalProxy = defaultProxy;
     }
 
     const localProxyUrl = `/api/proxy?url=${encodeURIComponent(rawStreamUrl)}&referer=${encodeURIComponent(this.baseUrl + '/')}`;
@@ -543,7 +547,7 @@ export class MacCmsHtmlProvider implements BaseMediaProvider {
 
     return {
       streamUrl: effectiveProxyUrl,
-      fallbackProxyUrl: localProxyUrl,
+      fallbackProxyUrl: effectiveProxyUrl,
       headers: {
         Referer: `${this.baseUrl}/`,
       },

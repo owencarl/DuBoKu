@@ -479,12 +479,17 @@ export class LibvioProvider implements BaseMediaProvider {
     console.log(`[${this.name}] Resolved final stream URL:`, resolvedUrl);
 
     const isMp4 = resolvedUrl.toLowerCase().includes('.mp4');
-    let externalProxy = process.env.STREAM_PROXY_URL || process.env.NEXT_PUBLIC_STREAM_PROXY_URL;
+    const defaultProxy = 'https://duboku-proxy.liukun-tju.workers.dev';
+    let externalProxy =
+      process.env.STREAM_PROXY_URL ||
+      process.env.NEXT_PUBLIC_STREAM_PROXY_URL ||
+      defaultProxy;
+
     if (
       externalProxy &&
       (externalProxy.includes('yourname') || externalProxy.includes('example') || !externalProxy.startsWith('http'))
     ) {
-      externalProxy = undefined;
+      externalProxy = defaultProxy;
     }
 
     const localProxyUrl = `/api/proxy?url=${encodeURIComponent(resolvedUrl)}&referer=${encodeURIComponent(this.baseUrl + '/')}`;
