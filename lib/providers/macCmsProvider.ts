@@ -6,6 +6,7 @@ export interface MacCmsConfig {
   key: string;
   name: string;
   baseUrl: string;
+  fallbackUrls?: string[];
   searchPath?: string; // default: '/vodsearch/-------------.html?wd='
   customHeaders?: Record<string, string>;
   description?: string;
@@ -31,27 +32,49 @@ export class MacCmsHtmlProvider implements BaseMediaProvider {
   }
 
   /**
-   * Safe fetch with standard user agent and referer headers
+   * Safe fetch with standard user agent, candidate fallback mirror failover, and timeout
    */
   protected async fetchHtml(pathOrUrl: string): Promise<string> {
-    const url = pathOrUrl.startsWith('http') ? pathOrUrl : `${this.baseUrl}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`;
-    const headers = {
-      'User-Agent':
-        'Mozilla/5.0 (Linux; Android 14; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36',
-      Referer: `${this.baseUrl}/`,
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-      ...this.config.customHeaders,
-    };
+    const isFullUrl = pathOrUrl.startsWith('http');
+    const path = isFullUrl ? null : pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
+    const candidateBases = [this.baseUrl, ...(this.config.fallbackUrls || [])];
 
-    const res = await fetch(url, {
-      headers,
-      cache: 'no-store',
-    });
+    let lastError: Error | null = null;
+    for (const base of candidateBases) {
+      const cleanBase = base.replace(/\/$/, '');
+      const targetUrl = isFullUrl ? pathOrUrl : `${cleanBase}${path}`;
+      try {
+        const headers = {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+          Referer: `${cleanBase}/`,
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          ...this.config.customHeaders,
+        };
 
-    if (!res.ok) {
-      throw new Error(`[${this.name}] Failed to fetch ${url}: ${res.status}`);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 7000);
+
+        const res = await fetch(targetUrl, {
+          headers,
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+
+        clearTimeout(timer);
+
+        if (!res.ok) {
+          throw new Error(`[${this.name}] HTTP ${res.status} from ${targetUrl}`);
+        }
+        return await res.text();
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[${this.name}] Fetch failed on ${targetUrl}:`, err.message);
+        if (isFullUrl) break;
+      }
     }
-    return res.text();
+
+    throw lastError || new Error(`[${this.name}] Failed to fetch ${pathOrUrl}`);
   }
 
   /**
@@ -248,7 +271,17 @@ export class MacCmsHtmlProvider implements BaseMediaProvider {
       detailPath = `/voddetail/${detailPath}.html`;
     }
 
-    const html = await this.fetchHtml(detailPath);
+    let html: string;
+    try {
+      html = await this.fetchHtml(detailPath);
+    } catch (err) {
+      if (detailPath.startsWith('/voddetail/')) {
+        detailPath = `/detail/${decodedId}.html`;
+        html = await this.fetchHtml(detailPath);
+      } else {
+        throw err;
+      }
+    }
     const $ = cheerio.load(html);
 
     const title =
@@ -397,7 +430,17 @@ export class MacCmsHtmlProvider implements BaseMediaProvider {
     }
 
     console.log(`[${this.name}] Fetching play page: ${playPath}`);
-    const html = await this.fetchHtml(playPath);
+    let html: string;
+    try {
+      html = await this.fetchHtml(playPath);
+    } catch (err) {
+      if (playPath.startsWith('/vodplay/')) {
+        playPath = `/play/${decodedEpId}.html`;
+        html = await this.fetchHtml(playPath);
+      } else {
+        throw err;
+      }
+    }
 
     // MacCMS embeds stream configuration in `var player_data = {...}` or `var player_aaaa = {...}`
     let playerConfig: any = null;

@@ -10,4 +10,4 @@ export * from './registry';
 
 // Default active singleton media provider for backward compatibility
 export const mediaProvider: BaseMediaProvider = providerRegistry.getProvider();
-export const fallbackProvider: BaseMediaProvider = providerRegistry.getProvider('mock');
+export const fallbackProvider: BaseMediaProvider = providerRegistry.getProvider('libvio') || providerRegistry.getProvider();

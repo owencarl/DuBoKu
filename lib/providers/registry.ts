@@ -50,15 +50,30 @@ class ProviderRegistry {
       description: '免解析秒播直连，海量电视剧、院线电影与动漫',
     });
 
-    // 3. Demo / Standalone Testing Source: 演示片库 (Public Test HLS)
-    const mock = new MockMediaProvider();
+    // 3. Tertiary Source: LIBVIO (利博影视)
+    const libvio = new MacCmsHtmlProvider({
+      key: 'libvio',
+      name: 'LIBVIO (利博影视)',
+      baseUrl: process.env.LIBVIO_BASE_URL || 'https://www.libvio.to',
+      fallbackUrls: [
+        'https://libvio.host',
+        'https://libviobd.com',
+        'https://www.libvio.pw',
+        'https://libvio.app',
+      ],
+      searchPath: '/search/-------------.html?wd=',
+      description: '热门华语影视、高清欧美日韩剧集与动漫',
+    });
     this.register({
-      key: 'mock',
-      name: '演示片库',
-      provider: mock,
-      description: '独立免网测试源，包含公开测试 HLS 流',
+      key: 'libvio',
+      name: 'LIBVIO (利博影视)',
+      provider: libvio,
+      baseUrl: 'https://www.libvio.to',
+      description: '热门华语影视、高清欧美日韩剧集与动漫',
     });
   }
+
+  private mockProvider = new MockMediaProvider();
 
   public register(entry: ProviderEntry) {
     this.providers.set(entry.key, entry);
@@ -70,6 +85,9 @@ class ProviderRegistry {
   public getProvider(key?: string): BaseMediaProvider {
     if (!key) {
       return this.providers.get(this.defaultKey)!.provider;
+    }
+    if (key === 'mock') {
+      return this.mockProvider;
     }
     const entry = this.providers.get(key);
     if (entry) {
