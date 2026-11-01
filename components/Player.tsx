@@ -122,6 +122,8 @@ export default function Player({
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
+      setIsPlaying(false);
+      setShowControls(true);
 
       const resumeTime = getResumeTime(media.id, currentEpisode.id);
 
@@ -430,8 +432,31 @@ export default function Player({
       controlsTimeoutRef.current = setTimeout(() => {
         setShowControls(false);
         setShowSpeedMenu(false);
-      }, 3500);
+      }, 3000);
     }
+  }, [isPlaying]);
+
+  // Auto-hide controls when video starts playing or resumes, and keep visible when paused
+  useEffect(() => {
+    if (isPlaying) {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+      controlsTimeoutRef.current = setTimeout(() => {
+        setShowControls(false);
+        setShowSpeedMenu(false);
+      }, 3000);
+    } else {
+      setShowControls(true);
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    }
+    return () => {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+    };
   }, [isPlaying]);
 
   const togglePlay = () => {
@@ -692,6 +717,7 @@ export default function Player({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onClick={resetControlsTimer}
+      onMouseMove={resetControlsTimer}
     >
       {/* Video Element */}
       <video
@@ -701,7 +727,11 @@ export default function Player({
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onWaiting={() => setIsLoading(true)}
-        onPlaying={() => setIsLoading(false)}
+        onPlaying={() => {
+          setIsLoading(false);
+          setIsPlaying(true);
+          resetControlsTimer();
+        }}
         onTimeUpdate={handleTimeUpdate}
         onEnded={() => {
           if (onNextEpisode) onNextEpisode();
