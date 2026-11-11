@@ -74,6 +74,7 @@ export default function Player({
   const feedbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSaveTimeRef = useRef<number>(0);
+  const currentOrientationLockRef = useRef<'landscape-primary' | 'landscape-secondary' | 'landscape' | null>(null);
 
   // Resolve raw stream URL or proxied URL
   const fetchStreamUrl = useCallback(async (episodeId: string) => {
@@ -578,6 +579,18 @@ export default function Player({
     isSwipeGestureRef.current = false;
   };
 
+  // Helper to safely unlock screen orientation
+  const safeUnlockOrientation = () => {
+    currentOrientationLockRef.current = null;
+    try {
+      if (typeof window !== 'undefined' && screen.orientation && 'unlock' in screen.orientation) {
+        (screen.orientation as any).unlock();
+      }
+    } catch {
+      // Ignore orientation unlock error
+    }
+  };
+
   // Listen to fullscreenchange to keep state synced & unlock orientation when leaving
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -588,13 +601,7 @@ export default function Player({
       );
       setIsFullscreen(isNowFs);
       if (!isNowFs) {
-        try {
-          if (screen.orientation && 'unlock' in screen.orientation) {
-            (screen.orientation as any).unlock();
-          }
-        } catch {
-          // Ignore orientation unlock error
-        }
+        safeUnlockOrientation();
       }
     };
 
@@ -604,13 +611,97 @@ export default function Player({
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-      try {
-        if (screen.orientation && 'unlock' in screen.orientation) {
-          (screen.orientation as any).unlock();
-        }
-      } catch {}
+      safeUnlockOrientation();
     };
   }, []);
+
+  // Sensor-directed dynamic landscape rotation (Landscape Left 90° vs Landscape Right 270° / 180° flip)
+  useEffect(() => {
+    if (!isFullscreen) return;
+
+    let pendingTarget: 'landscape-primary' | 'landscape-secondary' | null = null;
+    let debounceTimer: NodeJS.Timeout | null = null;
+
+    const applyLock = async (target: 'landscape-primary' | 'landscape-secondary') => {
+      if (currentOrientationLockRef.current === target) return;
+      if (typeof window !== 'undefined' && screen.orientation && 'lock' in screen.orientation) {
+        try {
+          await (screen.orientation as any).lock(target);
+          currentOrientationLockRef.current = target;
+        } catch {
+          try {
+            await (screen.orientation as any).lock('landscape');
+            currentOrientationLockRef.current = 'landscape';
+          } catch {}
+        }
+      }
+    };
+
+    // 1. Listen to system screen.orientation change (when device auto-rotate is enabled)
+    const handleOrientationChange = () => {
+      if (!screen.orientation) return;
+      const angle = screen.orientation.angle;
+      const type = screen.orientation.type;
+      if (type === 'landscape-secondary' || angle === 270 || angle === -90) {
+        applyLock('landscape-secondary');
+      } else if (type === 'landscape-primary' || angle === 90) {
+        applyLock('landscape-primary');
+      }
+    };
+
+    if (screen.orientation && 'addEventListener' in screen.orientation) {
+      screen.orientation.addEventListener('change', handleOrientationChange);
+    }
+
+    // 2. Listen to accelerometer (devicemotion) to detect 180° flip even if OS auto-rotate is disabled
+    const handleMotion = (event: DeviceMotionEvent) => {
+      const x = event.accelerationIncludingGravity?.x;
+      if (typeof x !== 'number' || isNaN(x)) return;
+
+      // X > 3.5 m/s²: Top of phone on left, bottom on right => landscape-primary (90°)
+      // X < -3.5 m/s²: Top of phone on right, bottom on left => landscape-secondary (270°)
+      let detectedTarget: 'landscape-primary' | 'landscape-secondary' | null = null;
+      if (x > 3.5) {
+        detectedTarget = 'landscape-primary';
+      } else if (x < -3.5) {
+        detectedTarget = 'landscape-secondary';
+      }
+
+      if (detectedTarget && detectedTarget !== currentOrientationLockRef.current) {
+        if (detectedTarget !== pendingTarget) {
+          pendingTarget = detectedTarget;
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            if (pendingTarget) {
+              applyLock(pendingTarget);
+            }
+          }, 250);
+        }
+      } else {
+        pendingTarget = null;
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+          debounceTimer = null;
+        }
+      }
+    };
+
+    if (typeof window !== 'undefined' && 'DeviceMotionEvent' in window) {
+      window.addEventListener('devicemotion', handleMotion);
+    }
+
+    return () => {
+      if (screen.orientation && 'removeEventListener' in screen.orientation) {
+        screen.orientation.removeEventListener('change', handleOrientationChange);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('devicemotion', handleMotion);
+      }
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+    };
+  }, [isFullscreen]);
 
   // Safe close handler that restores orientation & exits fullscreen
   const handleClose = async () => {
@@ -623,11 +714,7 @@ export default function Player({
         }
       } catch {}
     }
-    try {
-      if (screen.orientation && 'unlock' in screen.orientation) {
-        (screen.orientation as any).unlock();
-      }
-    } catch {}
+    safeUnlockOrientation();
     onClose();
   };
 
@@ -647,7 +734,7 @@ export default function Player({
     }
   };
 
-  // Fullscreen with automatic mobile landscape lock
+  // Fullscreen with sensor-directed mobile landscape lock
   const toggleFullscreen = async () => {
     const container = containerRef.current;
     const video = videoRef.current;
@@ -669,9 +756,28 @@ export default function Player({
         }
         setIsFullscreen(true);
 
-        // Lock to landscape for mobile devices
-        if (screen.orientation && 'lock' in screen.orientation) {
-          await (screen.orientation as any).lock('landscape').catch(() => {});
+        // Lock to landscape matching the phone's current direction
+        if (typeof window !== 'undefined' && screen.orientation && 'lock' in screen.orientation) {
+          const angle = screen.orientation.angle !== undefined
+            ? screen.orientation.angle
+            : (window as any).orientation !== undefined
+            ? (window as any).orientation
+            : 0;
+
+          const initialTarget: 'landscape-primary' | 'landscape-secondary' =
+            (angle === 270 || angle === -90 || screen.orientation.type === 'landscape-secondary')
+              ? 'landscape-secondary'
+              : 'landscape-primary';
+
+          try {
+            await (screen.orientation as any).lock(initialTarget);
+            currentOrientationLockRef.current = initialTarget;
+          } catch {
+            try {
+              await (screen.orientation as any).lock('landscape');
+              currentOrientationLockRef.current = 'landscape';
+            } catch {}
+          }
         }
       } else {
         if (document.exitFullscreen) {
@@ -680,9 +786,7 @@ export default function Player({
           await (document as any).webkitExitFullscreen();
         }
         setIsFullscreen(false);
-        if (screen.orientation && 'unlock' in screen.orientation) {
-          (screen.orientation as any).unlock();
-        }
+        safeUnlockOrientation();
       }
     } catch (err) {
       console.warn('[Player] Fullscreen/orientation toggle failed:', err);
